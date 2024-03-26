@@ -16,7 +16,7 @@ inputs:
     release-candidate:
         required: false
         description: Determines if the release is a release candidate
-        default: 'true'
+        default: true
     slack-webhook-url:
         required: false
         description: A webhook URL of a Slack channel that if provided, will notify the release
@@ -29,6 +29,18 @@ inputs:
     production-action-url:
         required: false
         description: A URL of the production deployment action that will be used in the slack notification
+    release-since-last-tag:
+        required: false
+        description: If the release type should be inferred from all commits since last tag
+        default: false
+    use-changelogen:
+        required: false
+        description: Use changelogen to generate the changelog
+        default: false
+    changelogen-version:
+        required: false
+        description: Which version of changelogen to use
+        default: unjs/changelogen@v0.5.5
 outputs:
     next-version:
         description: Next version to be released

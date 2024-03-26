@@ -1,16 +1,20 @@
 import * as core from '@actions/core'
+import { getExecOutput } from '@actions/exec'
 import { context } from '@actions/github'
 import { generateChangelog } from './changelog'
 import { notifyDiscordChannel } from './discord'
 import { getLastCommitMessage, getLastGitTag, tagCommit } from './git'
 import { createGithubRelease } from './github'
 import { notifySlackChannel } from './slack'
-import { getNextVersion, getPureVersion, getReleaseTypeFromCommitMessage } from './version'
+import { getNextVersion, getPureVersion, getReleaseTypeFromCommitMessage, getReleaseTypeFromCommitsSinceLastTag, ReleaseType } from './version'
 
 async function run(): Promise<void> {
     const isReleaseCandidate = core.getInput('release-candidate') === 'true'
     const slackWebhookUrl = core.getInput('slack-webhook-url')
     const discordWebhookUrl = core.getInput('discord-webhook-url')
+    const releaseSinceLastTag = core.getInput('release-since-last-tag')
+    const useChangelogen = core.getInput('use-changelogen')
+    const changelogenVersion = core.getInput('changelogen-version')
 
     try {
         const currentVersion = await getLastGitTag({
@@ -20,27 +24,54 @@ async function run(): Promise<void> {
         if (currentVersion === null)
             return
 
-        const lastCommitMessage = await getLastCommitMessage()
-        if (lastCommitMessage === null)
-            return
+        let releaseType: string | null = 'non-release'
+        if (releaseSinceLastTag) {
+            core.info('Inferring release type from contents of the release')
+            releaseType = await getReleaseTypeFromCommitsSinceLastTag()
+        } else {
+            const lastCommitMessage = await getLastCommitMessage()
+            if (lastCommitMessage === null)
+                return
+            core.info(`Inferring release type from last commit message: ${lastCommitMessage}`)
+            const releaseType = getReleaseTypeFromCommitMessage(lastCommitMessage)
+        }
 
-        const releaseType = getReleaseTypeFromCommitMessage(lastCommitMessage)
-
-        // If the commit isn't of type `feat` or `fix`, we don't want to bump the version
-        if (releaseType !== null) {
+        // If we're creating a release we want to bump the version
+        if (releaseType !== null && releaseType !== 'non-release') {
+            core.info(`New release version should be type ${releaseType}`)
+            core.setOutput('release-type', releaseType)
             const nextVersion = isReleaseCandidate
-                ? getNextVersion({ currentVersion, releaseType })
+                ? getNextVersion({ currentVersion, releaseType: releaseType as ReleaseType })
                 : (
                     currentVersion.match(/rc$/)
                         ? getPureVersion(currentVersion)
-                        : getNextVersion({ currentVersion, releaseType })
+                        : getNextVersion({ currentVersion, releaseType: releaseType as ReleaseType })
                 )
             core.info(`Publishing a release candidate for version ${nextVersion}`)
 
-            const changelog = await generateChangelog(context)
+            const success = await tagCommit(nextVersion, isReleaseCandidate)
+            if (success === null) {
+                // Action should bail as tag is prerequisite for release
+                core.setFailed('Could not tag commit')
+                return
+            }
 
-            await tagCommit(nextVersion, isReleaseCandidate)
+            let changelog: string = ''
 
+            if (useChangelogen) {
+                core.info('Using changelogen to generate changelog')
+                const { stdout, exitCode } = await getExecOutput(
+                    `pnpm dlx github:${changelogenVersion} --from ${currentVersion} --to ${nextVersion}`)
+                if (exitCode !== 0) {
+                    throw Error
+                }
+                // Make sure the changelog starts with the header text
+                changelog = stdout.replace(/^[^#]*##/, '##');
+            }
+            else {
+                core.info('Using built-in changelog generator to generate changelog')
+                changelog = await generateChangelog(context)
+            }
             await createGithubRelease(context, nextVersion, changelog, isReleaseCandidate)
 
             if (slackWebhookUrl !== '') {

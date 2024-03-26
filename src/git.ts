@@ -67,17 +67,18 @@ const setGitCommiter = async(): Promise<void> => {
     try {
         const name = core.getInput('git-committer-name')
         const email = core.getInput('git-committer-email')
+        core.startGroup('Setting git committer identity')
+        core.info(`Using ${name} <${email}>`)
         if (name === '' || email === '')
             throw new Error('Git committer name and email are required')
 
-        core.startGroup('Setting git commiter identity')
         const { exitCode: exitCodeName } = await getExecOutput(
             `git config --global user.name "${name}"`,
             [],
             { silent: true },
         )
         if (exitCodeName !== 0)
-            throw new Error('Could not set git commiter name')
+            throw new Error('Could not set git committer name')
 
         const { exitCode: exitCodeEmail } = await getExecOutput(
             `git config --global user.email "${email}"`,
@@ -85,12 +86,13 @@ const setGitCommiter = async(): Promise<void> => {
             { silent: true },
         )
         if (exitCodeEmail !== 0)
-            throw new Error('Could not set git commiter email')
-        core.info('Git commiter identity set.')
+            throw new Error('Could not set git committer email')
+
+        core.info('Git committer identity set.')
         core.endGroup()
     }
     catch (e: any) {
-        core.error(`Could not set git commiter identity\n${e.message}`)
+        core.error(`Could not set git committer identity\n${e.message}`)
     }
 }
 
