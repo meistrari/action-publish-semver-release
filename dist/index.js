@@ -354,20 +354,21 @@ const setGitCommiter = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const name = core.getInput('git-committer-name');
         const email = core.getInput('git-committer-email');
+        core.startGroup('Setting git committer identity');
+        core.info(`Using ${name} <${email}>`);
         if (name === '' || email === '')
             throw new Error('Git committer name and email are required');
-        core.startGroup('Setting git commiter identity');
         const { exitCode: exitCodeName } = yield (0, exec_1.getExecOutput)(`git config --global user.name "${name}"`, [], { silent: true });
         if (exitCodeName !== 0)
-            throw new Error('Could not set git commiter name');
+            throw new Error('Could not set git committer name');
         const { exitCode: exitCodeEmail } = yield (0, exec_1.getExecOutput)(`git config --global user.email "${email}"`, [], { silent: true });
         if (exitCodeEmail !== 0)
-            throw new Error('Could not set git commiter email');
-        core.info('Git commiter identity set.');
+            throw new Error('Could not set git committer email');
+        core.info('Git committer identity set.');
         core.endGroup();
     }
     catch (e) {
-        core.error(`Could not set git commiter identity\n${e.message}`);
+        core.error(`Could not set git committer identity\n${e.message}`);
     }
 });
 const tagCommit = (nextVersion, isReleaseCandidate) => __awaiter(void 0, void 0, void 0, function* () {
@@ -526,6 +527,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(3031));
+const exec_1 = __nccwpck_require__(7000);
 const github_1 = __nccwpck_require__(2737);
 const changelog_1 = __nccwpck_require__(6293);
 const discord_1 = __nccwpck_require__(512);
@@ -538,6 +540,9 @@ function run() {
         const isReleaseCandidate = core.getInput('release-candidate') === 'true';
         const slackWebhookUrl = core.getInput('slack-webhook-url');
         const discordWebhookUrl = core.getInput('discord-webhook-url');
+        const releaseSinceLastTag = core.getInput('release-since-last-tag');
+        const useChangelogen = core.getInput('use-changelogen');
+        const changelogenVersion = core.getInput('changelogen-version');
         try {
             const currentVersion = yield (0, git_1.getLastGitTag)({
                 considerReleaseCandidates: true,
@@ -545,20 +550,48 @@ function run() {
             });
             if (currentVersion === null)
                 return;
-            const lastCommitMessage = yield (0, git_1.getLastCommitMessage)();
-            if (lastCommitMessage === null)
-                return;
-            const releaseType = (0, version_1.getReleaseTypeFromCommitMessage)(lastCommitMessage);
-            // If the commit isn't of type `feat` or `fix`, we don't want to bump the version
-            if (releaseType !== null) {
+            let releaseType = null;
+            if (releaseSinceLastTag) {
+                core.info('Inferring release type from contents of the release');
+                releaseType = yield (0, version_1.getReleaseTypeFromCommitsSinceLastTag)();
+            }
+            else {
+                const lastCommitMessage = yield (0, git_1.getLastCommitMessage)();
+                if (lastCommitMessage === null)
+                    return;
+                core.info(`Inferring release type from last commit message: ${lastCommitMessage}`);
+                const releaseType = (0, version_1.getReleaseTypeFromCommitMessage)(lastCommitMessage);
+            }
+            // If we're creating a release we want to bump the version
+            if (releaseType !== null && releaseType !== 'non-release') {
+                core.info(`New release version should be type ${releaseType}`);
+                core.setOutput('release-type', releaseType);
                 const nextVersion = isReleaseCandidate
                     ? (0, version_1.getNextVersion)({ currentVersion, releaseType })
                     : (currentVersion.match(/rc$/)
                         ? (0, version_1.getPureVersion)(currentVersion)
                         : (0, version_1.getNextVersion)({ currentVersion, releaseType }));
                 core.info(`Publishing a release candidate for version ${nextVersion}`);
-                const changelog = yield (0, changelog_1.generateChangelog)(github_1.context);
-                yield (0, git_1.tagCommit)(nextVersion, isReleaseCandidate);
+                const success = yield (0, git_1.tagCommit)(nextVersion, isReleaseCandidate);
+                if (success === null) {
+                    // Action should bail as tag is prerequisite for release
+                    core.setFailed('Could not tag commit');
+                    return;
+                }
+                let changelog = '';
+                if (useChangelogen) {
+                    core.info('Using changelogen to generate changelog');
+                    const { stdout, exitCode } = yield (0, exec_1.getExecOutput)(`pnpm dlx github:${changelogenVersion} --from ${currentVersion} --to ${nextVersion}`);
+                    if (exitCode !== 0) {
+                        throw Error;
+                    }
+                    // Make sure the changelog starts with the header text
+                    changelog = stdout.replace(/^[^#]*##/, '##');
+                }
+                else {
+                    core.info('Using built-in changelog generator to generate changelog');
+                    changelog = yield (0, changelog_1.generateChangelog)(github_1.context);
+                }
                 yield (0, github_2.createGithubRelease)(github_1.context, nextVersion, changelog, isReleaseCandidate);
                 if (slackWebhookUrl !== '') {
                     yield (0, slack_1.notifySlackChannel)(slackWebhookUrl, {
@@ -745,36 +778,93 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getPureVersion = exports.getNextVersion = exports.getReleaseTypeFromCommitMessage = void 0;
+exports.getPureVersion = exports.getNextVersion = exports.getReleaseTypeFromCommitsSinceLastTag = exports.getReleaseTypeFromCommits = exports.getReleaseTypeFromCommitMessage = void 0;
 const core = __importStar(__nccwpck_require__(3031));
+const git_1 = __nccwpck_require__(3008);
+const exec_1 = __nccwpck_require__(7000);
 const getReleaseTypeFromCommitMessage = (commitMessage) => {
-    if (/^feat(\([^/)]+\))?!/i.test(commitMessage))
+    if (/^(feat|fix)(\([^)]+\))?!/i.test(commitMessage))
         return 'major';
     if (/^feat/i.test(commitMessage))
         return 'minor';
-    if (/^fix/i.test(commitMessage))
+    if (/^fix|chore|refactor/i.test(commitMessage))
         return 'patch';
-    if (/^chore/i.test(commitMessage) || /^ci/i.test(commitMessage) || /^build/i.test(commitMessage))
+    if (/^docs|ci|build/i.test(commitMessage))
         return 'non-release';
     return null;
 };
 exports.getReleaseTypeFromCommitMessage = getReleaseTypeFromCommitMessage;
+const getReleaseTypeFromCommits = (commits) => {
+    let highestReleaseTypeFound = 'non-release';
+    const precedence = {
+        'non-release': 4,
+        'patch': 3,
+        'minor': 2,
+        'major': 1
+    };
+    for (const commit of commits) {
+        const commitType = (0, exports.getReleaseTypeFromCommitMessage)(commit);
+        if (commitType === null)
+            continue;
+        if (precedence[commitType] < precedence[highestReleaseTypeFound]) {
+            if (commitType === 'major') {
+                return 'major';
+            }
+            highestReleaseTypeFound = commitType;
+        }
+    }
+    return highestReleaseTypeFound;
+};
+exports.getReleaseTypeFromCommits = getReleaseTypeFromCommits;
+const getReleaseTypeFromCommitsSinceLastTag = () => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        core.startGroup('Getting release type from commits since last tag');
+        const lastTag = yield (0, git_1.getLastGitTag)({ considerReleaseCandidates: false });
+        core.info(`Considering commits since [${lastTag}](${lastTag}) to HEAD`);
+        const { stdout: commitsSinceLastTag, exitCode: commitsSinceLastTagExitCode } = yield (0, exec_1.getExecOutput)(`git log --oneline ${lastTag}..HEAD --pretty=format:%s`);
+        if (commitsSinceLastTagExitCode !== 0)
+            throw Error;
+        core.endGroup();
+        return (0, exports.getReleaseTypeFromCommits)(commitsSinceLastTag.split('\n'));
+    }
+    catch (e) {
+        core.error('Could not get release type from commits since last tag');
+        return null;
+    }
+});
+exports.getReleaseTypeFromCommitsSinceLastTag = getReleaseTypeFromCommitsSinceLastTag;
 const getNextVersion = (options) => {
-    // verify that the current version is valid semver
-    if (options.currentVersion.match(/^\d+\.\d+\.\d+(-[\w\d]+)?$/) === null) {
+    // Verify that the current version is valid semver
+    if (options.currentVersion.match(/^(v?\d+\.\d+\.\d+(-[\w\d]+)?)$/) === null) {
         const errorMessage = `Invalid current version: ${options.currentVersion}`;
         core.error(errorMessage);
         throw new Error(errorMessage);
     }
+    // Handle the prefix in case there's one
+    let prefix = '';
+    if (options.currentVersion.startsWith('v')) {
+        options.currentVersion = options.currentVersion.replace(/^v/, '');
+        prefix = 'v';
+    }
     const pureVersion = options.currentVersion.split('-')[0];
     const [major, minor, patch] = pureVersion.split('.').map(Number);
-    return ({
+    const nextVersion = {
         'major': () => `${major + 1}.0.0`,
         'minor': () => `${major}.${minor + 1}.0`,
         'patch': () => `${major}.${minor}.${patch + 1}`,
         'non-release': () => pureVersion,
-    })[options.releaseType]();
+    };
+    return prefix + nextVersion[options.releaseType]();
 };
 exports.getNextVersion = getNextVersion;
 const getPureVersion = (version) => version.split('-')[0];
