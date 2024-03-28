@@ -24,7 +24,7 @@ async function run(): Promise<void> {
         if (currentVersion === null)
             return
 
-        let releaseType: string | null = 'non-release'
+        let releaseType: ReleaseType | null = null
         if (releaseSinceLastTag) {
             core.info('Inferring release type from contents of the release')
             releaseType = await getReleaseTypeFromCommitsSinceLastTag()
@@ -41,11 +41,11 @@ async function run(): Promise<void> {
             core.info(`New release version should be type ${releaseType}`)
             core.setOutput('release-type', releaseType)
             const nextVersion = isReleaseCandidate
-                ? getNextVersion({ currentVersion, releaseType: releaseType as ReleaseType })
+                ? getNextVersion({ currentVersion, releaseType })
                 : (
                     currentVersion.match(/rc$/)
                         ? getPureVersion(currentVersion)
-                        : getNextVersion({ currentVersion, releaseType: releaseType as ReleaseType })
+                        : getNextVersion({ currentVersion, releaseType })
                 )
             core.info(`Publishing a release candidate for version ${nextVersion}`)
 

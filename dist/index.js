@@ -550,7 +550,7 @@ function run() {
             });
             if (currentVersion === null)
                 return;
-            let releaseType = 'non-release';
+            let releaseType = null;
             if (releaseSinceLastTag) {
                 core.info('Inferring release type from contents of the release');
                 releaseType = yield (0, version_1.getReleaseTypeFromCommitsSinceLastTag)();
@@ -567,10 +567,10 @@ function run() {
                 core.info(`New release version should be type ${releaseType}`);
                 core.setOutput('release-type', releaseType);
                 const nextVersion = isReleaseCandidate
-                    ? (0, version_1.getNextVersion)({ currentVersion, releaseType: releaseType })
+                    ? (0, version_1.getNextVersion)({ currentVersion, releaseType })
                     : (currentVersion.match(/rc$/)
                         ? (0, version_1.getPureVersion)(currentVersion)
-                        : (0, version_1.getNextVersion)({ currentVersion, releaseType: releaseType }));
+                        : (0, version_1.getNextVersion)({ currentVersion, releaseType }));
                 core.info(`Publishing a release candidate for version ${nextVersion}`);
                 const success = yield (0, git_1.tagCommit)(nextVersion, isReleaseCandidate);
                 if (success === null) {
