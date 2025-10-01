@@ -61,7 +61,7 @@ async function run(): Promise<void> {
             if (useChangelogen) {
                 core.info('Using changelogen to generate changelog')
                 const { stdout, exitCode } = await getExecOutput(
-                    `bun i github:${changelogenVersion} --from ${currentVersion} --to ${nextVersion}`)
+                    `bunx github:${changelogenVersion} changelogen --from ${currentVersion} --to ${nextVersion}`)
                 if (exitCode !== 0) {
                     throw Error
                 }

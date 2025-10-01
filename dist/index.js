@@ -581,7 +581,7 @@ function run() {
                 let changelog = '';
                 if (useChangelogen) {
                     core.info('Using changelogen to generate changelog');
-                    const { stdout, exitCode } = yield (0, exec_1.getExecOutput)(`bunx github:${changelogenVersion} --from ${currentVersion} --to ${nextVersion}`);
+                    const { stdout, exitCode } = yield (0, exec_1.getExecOutput)(`bunx github:${changelogenVersion} changelogen --from ${currentVersion} --to ${nextVersion}`);
                     if (exitCode !== 0) {
                         throw Error;
                     }
